@@ -1,0 +1,33 @@
+{
+  "input_dir": "data",
+  "out_dir": "output",
+  "fbs_dir": "../FBS/OpenArknightsFBS/FBS",
+  "flatc": "flatc",
+  "template_dir": "zh_CN/gamedata",
+  "defaults_json": true,
+  "flatten_kv": true,
+  "postprocess_rules": "k_postprocess_rules.json",
+  "use_template_pad": true,
+  "skip_existing": false,
+  "chat_mask": "",
+  "cdn_fetch_anon": false,
+  "cdn_platform": "Windows",
+  "cdn_hu": "https://ak.hycdn.cn/assetbundle/official",
+  "cdn_hv": "https://ak-conf.hypergryph.com/config/prod/official/{platform}/version",
+  "cdn_anon_dir": "cdn_anon",
+  "cdn_skip_existing": true,
+  "cdn_workers": 8,
+  "run_studio_first": false,
+  "studio_cli": "",
+  "studio_input_apk": null,
+  "studio_input_hot": null,
+  "studio_hot_tmp": "studio_hot_tmp",
+  "studio_args": [
+    "-t",
+    "textAsset",
+    "-g",
+    "container",
+    "--filter-by-container",
+    "gamedata"
+  ]
+}
