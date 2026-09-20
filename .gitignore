@@ -1,0 +1,32 @@
+config.local.json
+config.json
+.env
+*.local.json
+
+# 运行产物与游戏数据
+data/
+output/
+cdn_anon/
+apk_download/
+studio_hot_tmp/
+base_data/
+# 参考模板 / 解包数据
+zh_CN/
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+*~
+
+# PyInstaller / 打包
+vendor/
+dist/
+build/
+

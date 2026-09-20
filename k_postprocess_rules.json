@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "by_field": {
+    "blackboard": "dict_to_kv_list",
+    "blackBoard": "dict_to_kv_list",
+    "talentBlackboard": "dict_to_kv_list",
+    "attributeBlackboard": "dict_to_kv_list",
+    "tokenAttributeBlackboard": "token_bb_map"
+  },
+  "by_path": {
+    "mapData.map": "flat_matrix_to_rows"
+  }
+}
