@@ -1,0 +1,242 @@
+name: Update Arknights GameData
+
+on:
+  schedule:
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 忽略底包/热更哈希，强制跑全流程
+        type: boolean
+        default: false
+  repository_dispatch:
+    types: [updata]
+
+concurrency:
+  group: arknights-gamedata-update
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+  GAMEDATA_REPO: Black-Star-Red/ArknightsGameData
+  GAMEDATA_BRANCH: master
+
+jobs:
+  probe:
+    name: Probe versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      should_run: ${{ steps.probe.outputs.should_run }}
+      apk_changed: ${{ steps.probe.outputs.apk_changed }}
+      hot_changed: ${{ steps.probe.outputs.hot_changed }}
+      fbs_changed: ${{ steps.probe.outputs.fbs_changed }}
+      studio_changed: ${{ steps.probe.outputs.studio_changed }}
+      apk_hash: ${{ steps.probe.outputs.apk_hash }}
+      apk_filename: ${{ steps.probe.outputs.apk_filename }}
+      res_version: ${{ steps.probe.outputs.res_version }}
+      hot_hash: ${{ steps.probe.outputs.hot_hash }}
+      client_version: ${{ steps.probe.outputs.client_version }}
+      fbs_sha: ${{ steps.probe.outputs.fbs_sha }}
+      studio_tag: ${{ steps.probe.outputs.studio_tag }}
+      studio_asset: ${{ steps.probe.outputs.studio_asset }}
+      studio_asset_url: ${{ steps.probe.outputs.studio_asset_url }}
+      flatc_version: ${{ steps.probe.outputs.flatc_version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Probe APK / hot update / FBS / StudioCLI
+        id: probe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_RUN: ${{ github.event_name == 'repository_dispatch' || (github.event_name == 'workflow_dispatch' && inputs.force) || false }}
+        run: python ci/gha_update.py probe --out-file fingerprint.json
+
+      - uses: actions/upload-artifact@v4
+        if: steps.probe.outputs.should_run == 'true'
+        with:
+          name: fingerprint
+          path: fingerprint.json
+          if-no-files-found: error
+
+  decode:
+    name: Decode and push
+    needs: probe
+    if: needs.probe.outputs.should_run == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 360
+    env:
+      CHAT_MASK: ${{ secrets.CHAT_MASK }}
+      CONFIG_PATH: config.local.json
+    steps:
+      - name: Check GAMEDATA_TOKEN
+        env:
+          GAMEDATA_TOKEN: ${{ secrets.GAMEDATA_TOKEN }}
+        run: |
+          if (-not $env:GAMEDATA_TOKEN) {
+            throw "Missing secret GAMEDATA_TOKEN (PAT with write access to $env:GAMEDATA_REPO)"
+          }
+
+      - name: Free disk space
+        continue-on-error: true
+        run: |
+          Write-Host "Disk before cleanup:"
+          Get-PSDrive -PSProvider FileSystem | Format-Table -AutoSize
+          $paths = @(
+            'C:\Android',
+            'C:\Program Files\Android',
+            'C:\Program Files (x86)\Android',
+            'C:\hostedtoolcache\windows\CodeQL',
+            'C:\hostedtoolcache\windows\Java',
+            'C:\hostedtoolcache\windows\Ruby',
+            'C:\hostedtoolcache\windows\go',
+            'C:\hostedtoolcache\windows\PyPy',
+            'C:\hostedtoolcache\windows\node',
+            'C:\ghcup',
+            'C:\Program Files\Java',
+            'C:\Program Files (x86)\Java',
+            'C:\Program Files\Microsoft SQL Server',
+            'C:\Program Files (x86)\Microsoft SQL Server',
+            'C:\Program Files\Azure Cosmos DB Emulator',
+            'C:\Program Files\MongoDB',
+            'C:\Program Files (x86)\Microsoft Visual Studio\2019',
+            'C:\Program Files\Microsoft Visual Studio\2022'
+          )
+          foreach ($p in $paths) {
+            if (Test-Path $p) {
+              Write-Host "Removing $p"
+              cmd /c "rmdir /s /q `"$p`""
+            }
+          }
+          Write-Host "Disk after cleanup:"
+          Get-PSDrive -PSProvider FileSystem | Format-Table -AutoSize
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python deps
+        run: python -m pip install -r requirements.txt
+
+      - name: Restore OpenArknightsFBS
+        id: cache-fbs
+        uses: actions/cache@v4
+        with:
+          path: vendor/OpenArknightsFBS
+          key: fbs-${{ runner.os }}-${{ needs.probe.outputs.fbs_sha }}
+
+      - name: Restore ArknightsStudioCLI
+        id: cache-studio
+        uses: actions/cache@v4
+        with:
+          path: vendor/studio
+          key: studio-${{ runner.os }}-${{ needs.probe.outputs.studio_tag }}-${{ needs.probe.outputs.studio_asset }}
+
+      - name: Restore flatc
+        uses: actions/cache@v4
+        with:
+          path: vendor/flatc.exe
+          key: flatc-${{ runner.os }}-${{ needs.probe.outputs.flatc_version }}
+
+      - name: Fetch tools (skip if cache already has them)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          python ci/gha_update.py fetch-tools
+          --vendor-dir vendor
+          --fbs-sha "${{ needs.probe.outputs.fbs_sha }}"
+          --fbs-changed "${{ needs.probe.outputs.fbs_changed }}"
+          --studio-tag "${{ needs.probe.outputs.studio_tag }}"
+          --studio-asset "${{ needs.probe.outputs.studio_asset }}"
+          --studio-asset-url "${{ needs.probe.outputs.studio_asset_url }}"
+          --studio-changed "${{ needs.probe.outputs.studio_changed }}"
+          --flatc-version "${{ needs.probe.outputs.flatc_version }}"
+
+      - name: Checkout ArknightsGameData
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GAMEDATA_REPO }}
+          ref: ${{ env.GAMEDATA_BRANCH }}
+          token: ${{ secrets.GAMEDATA_TOKEN }}
+          path: gamedata-repo
+          persist-credentials: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: fingerprint
+          path: .
+
+      - name: Write CI config
+        run: >
+          python ci/gha_update.py write-config
+          --root .
+          --vendor-dir vendor
+          --gamedata-dir gamedata-repo
+          --out config.local.json
+          --platform Android
+
+      - name: Run full pipeline (APK + CDN -> Studio -> decode)
+        run: python fbs_to_json.py --mode full
+
+      - name: Sync JSON into ArknightsGameData
+        run: >
+          python ci/gha_update.py sync
+          --output output
+          --dest gamedata-repo
+          --fingerprint fingerprint.json
+
+      - name: Drop leftover working copies
+        run: |
+          foreach ($p in @('data', 'output', 'apk_download', 'cdn_anon', 'studio_hot_tmp')) {
+            if (Test-Path $p) {
+              Remove-Item -Recurse -Force $p
+              Write-Host "removed $p"
+            }
+          }
+          Get-PSDrive -PSProvider FileSystem | Format-Table -AutoSize
+
+      - name: Commit and push
+        working-directory: gamedata-repo
+        env:
+          RES_VERSION: ${{ needs.probe.outputs.res_version }}
+          CLIENT_VERSION: ${{ needs.probe.outputs.client_version }}
+          APK_NAME: ${{ needs.probe.outputs.apk_filename }}
+          FBS_SHA: ${{ needs.probe.outputs.fbs_sha }}
+          STUDIO_TAG: ${{ needs.probe.outputs.studio_tag }}
+          FBS_CHANGED: ${{ needs.probe.outputs.fbs_changed }}
+          STUDIO_CHANGED: ${{ needs.probe.outputs.studio_changed }}
+          APK_CHANGED: ${{ needs.probe.outputs.apk_changed }}
+          HOT_CHANGED: ${{ needs.probe.outputs.hot_changed }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config core.autocrlf false
+          git config core.longpaths true
+          git config http.postBuffer 524288000
+          git add -A
+          $status = git status --porcelain
+          if (-not $status) {
+            Write-Host "No changes to commit"
+            exit 0
+          }
+          $fbs = if ($env:FBS_CHANGED -eq "true") { "updated $($env:FBS_SHA.Substring(0,12))" } else { "cached" }
+          $studio = if ($env:STUDIO_CHANGED -eq "true") { "updated $($env:STUDIO_TAG)" } else { "cached" }
+          $body = @(
+            "APK: $($env:APK_NAME) changed=$($env:APK_CHANGED)"
+            "hot: resVersion=$($env:RES_VERSION) client=$($env:CLIENT_VERSION) changed=$($env:HOT_CHANGED)"
+            "OpenArknightsFBS: $fbs"
+            "ArknightsStudioCLI: $studio"
+          ) -join "`n"
+          git commit -m "Update gamedata for $($env:RES_VERSION)" -m $body
+          git push origin HEAD:$env:GAMEDATA_BRANCH
