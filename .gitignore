@@ -19,14 +19,22 @@ __pycache__/
 *.pyo
 .pytest_cache/
 
-# 编辑器
+# 编辑器 / 系统
 .idea/
 .vscode/
 *.swp
 *~
+Thumbs.db
+desktop.ini
+.DS_Store
 
-# PyInstaller / 打包
+# PyInstaller / 打包（vendor 由 build.ps1 拉取，exe 发 Releases）
 vendor/
 dist/
 build/
+*.exe
+*.spec.bak
+# 打包时拷贝的内嵌配置与 template 已在 build/ 下；若残留密钥模块也不提交
+_pkg_secrets.py
+_embedded_chat_mask
 
