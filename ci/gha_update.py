@@ -412,34 +412,60 @@ def _extract_studio(zip_path: Path, studio_dir: Path) -> Path:
             shutil.copy2(extra, studio_dir / extra.name)
     return target
 
-
+def _fbs_head(dest: Path) -> str:
+    if not (dest / ".git").exists():
+        return ""
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(dest), "rev-parse", "HEAD"], text=True
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+def _git_clone_fbs(dest: Path, sha: str) -> None:
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    url = f"https://github.com/{FBS_REPO}.git"
+    if sha:
+        print(f"git fetch {url} @ {sha}", flush=True)
+        subprocess.run(["git", "init", str(dest)], check=True)
+        subprocess.run(["git", "-C", str(dest), "remote", "add", "origin", url], check=True)
+        subprocess.run(["git", "-C", str(dest), "fetch", "--depth", "1", "origin", sha], check=True)
+        subprocess.run(["git", "-C", str(dest), "checkout", "--detach", "FETCH_HEAD"], check=True)
+    else:
+        subprocess.run(
+            ["git", "clone", "--depth", "1", "--branch", FBS_BRANCH, url, str(dest)],
+            check=True,
+        )
+    got = subprocess.check_output(["git", "-C", str(dest), "rev-parse", "HEAD"], text=True).strip()
+    print(f"OpenArknightsFBS HEAD={got}", flush=True)
+    if sha and got != sha:
+        raise RuntimeError(f"OpenArknightsFBS HEAD {got} != probed {sha}")
 def cmd_fetch_tools(args: argparse.Namespace) -> int:
     vendor = Path(args.vendor_dir)
     vendor.mkdir(parents=True, exist_ok=True)
-    fbs_dir = vendor / "OpenArknightsFBS" / "FBS"
+    fbs_root = vendor / "OpenArknightsFBS"
+    fbs_dir = fbs_root / "FBS"
+    cached = _fbs_head(fbs_root)
+    sha_mismatch = bool(args.fbs_sha) and cached != args.fbs_sha
+    want_fbs = (
+        args.fbs_changed
+        or sha_mismatch
+        or not fbs_dir.is_dir()
+        or not any(fbs_dir.glob("*.fbs"))
+    )
+    if want_fbs:
+        print(
+            f"refresh OpenArknightsFBS cached={cached[:12] if cached else '-'} "
+            f"want={(args.fbs_sha or '')[:12]}",
+            flush=True,
+        )
+        _git_clone_fbs(fbs_root, args.fbs_sha)
+    else:
+        print(f"skip OpenArknightsFBS (unchanged, cache hit) {fbs_dir}", flush=True)
     studio_dir = vendor / "studio"
     studio_exe = studio_dir / "ArknightsStudioCLI.exe"
     flatc = vendor / ("flatc.exe" if os.name == "nt" else "flatc")
-
-    want_fbs = args.fbs_changed or not fbs_dir.is_dir() or not any(fbs_dir.glob("*.fbs"))
-    if want_fbs:
-        _git_clone_fbs(vendor / "OpenArknightsFBS", args.fbs_sha)
-    else:
-        print(f"skip OpenArknightsFBS (unchanged, cache hit) {fbs_dir}", flush=True)
-
-    want_studio = args.studio_changed or not studio_exe.is_file()
-    if want_studio:
-        zpath = vendor / (args.studio_asset or "ArknightsStudioCLI.zip")
-        _download(args.studio_asset_url, zpath)
-        exe = _extract_studio(zpath, studio_dir)
-        print(f"studio_cli={exe}", flush=True)
-        try:
-            zpath.unlink()
-        except OSError:
-            pass
-    else:
-        print(f"skip ArknightsStudioCLI (unchanged, cache hit) {studio_exe}", flush=True)
-
     if not flatc.is_file():
         zip_name = "Windows.flatc.binary.zip" if os.name == "nt" else "Linux.flatc.binary.g++-13.zip"
         url = f"https://github.com/google/flatbuffers/releases/download/{args.flatc_version}/{zip_name}"
