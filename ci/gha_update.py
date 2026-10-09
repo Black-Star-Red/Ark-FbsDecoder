@@ -308,7 +308,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
     studio_changed = _changed({"studio": studio}, prev, "studio", "tag") or _changed(
         {"studio": studio}, prev, "studio", "asset"
     )
-    should_run = force or apk_changed or hot_changed
+    should_run = force or apk_changed or hot_changed or fbs_changed
 
     fingerprint = {
         "probed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -448,6 +448,7 @@ def cmd_fetch_tools(args: argparse.Namespace) -> int:
     fbs_dir = fbs_root / "FBS"
     cached = _fbs_head(fbs_root)
     sha_mismatch = bool(args.fbs_sha) and cached != args.fbs_sha
+    
     want_fbs = (
         args.fbs_changed
         or sha_mismatch
